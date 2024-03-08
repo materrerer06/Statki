@@ -1,157 +1,138 @@
 import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
 import io from 'socket.io-client';
 
-const socket = io.connect("http://localhost:3001");
+// Inicjalizacja Firebase
+const firebaseConfig = {
+  apiKey: "AIzaSyCd2zfm-laB4KOgkfbD9LmakPRM3OQRGDk",
+  authDomain: "gameproject-df49d.firebaseapp.com",
+  projectId: "gameproject-df49d",
+  storageBucket: "gameproject-df49d.appspot.com",
+  messagingSenderId: "82731476035",
+  appId: "1:82731476035:web:73fcd70ed9f1bcd83ce0f6",
+  measurementId: "G-RDG1Y8GBSH"
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const firestore = getFirestore(firebaseApp);
 
-function TicTacToe() {
- const [board, setBoard] = useState(Array(9).fill(null)); // Game board
- const [currentPlayer, setCurrentPlayer] = useState(null); // Current player
- const [gameId, setGameId] = useState(null); // Game ID
- const [gameOver, setGameOver] = useState(false); // Game over state
- const [winner, setWinner] = useState(null); // Winner of the game
- const [reset, setReset] = useState(false); // Reset game state
+const socket = io.connect('http://localhost:3001');
 
- const playerTurn = currentPlayer === 'X' ? 'O' : 'X';
- // Check for a win or a draw
- const checkGameStatus = () => {
-    const lines = [
-      [0, 1, 2],
-      [3, 4, 5],
-      [6, 7, 8],
-      [0, 3, 6],
-      [1, 4, 7],
-      [2, 5, 8],
-      [0, 4, 8],
-      [2, 4, 6]
-    ];
+function App() {
+  const [gameData, setGameData] = useState({ gameId: null, board: Array(9).fill(null), turn: 'X', availableGames: [] });
+  const [error, setError] = useState(null);
+  const [isPlayer1, setIsPlayer1] = useState(false); // Dodajemy stan, aby śledzić, czy gracz jest graczem 1
 
-    for (let i = 0; i < lines.length; i++) {
-      const [a, b, c] = lines[i];
-      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-        setWinner(currentPlayer);
-        return true;
-      }
-    }
-
-    if (!board.includes(null)) {
-      setWinner('draw');
-      return true;
-    }
-
-    return false;
- };
-
- // Listen for 'move' event
- useEffect(() => {
-    socket.on('move', ({ index, player }) => {
-      const newBoard = [...board];
-      newBoard[index] = player;
-      setBoard(newBoard);
-      // Switch player after receiving move confirmation from the server
-      setCurrentPlayer(currentPlayer === 'X' ? 'O' : 'X');
-    });
-  
-    return () => {
-      socket.off('move');
-    };
-  }, [board, currentPlayer]);
-
- // Listen for 'foundPlayer' event
- useEffect(() => {
-    socket.on('foundPlayer', ({ gameId, currentPlayer }) => {
-      setGameId(gameId);
-      setCurrentPlayer(currentPlayer);
+  useEffect(() => {
+    // Nasłuchuj zmian w kolekcji Firestore
+    const unsubscribe = onSnapshot(collection(firestore, 'games'), snapshot => {
+      const games = [];
+      snapshot.forEach(doc => {
+        games.push({ gameId: doc.id, ...doc.data() });
+      });
+      setGameData(prevGameData => ({
+        ...prevGameData,
+        availableGames: games
+      }));
+    }, error => {
+      console.log(error.message);
     });
 
     return () => {
-      socket.off('foundPlayer');
+      unsubscribe(); // Wyłącz nasłuchiwanie, gdy komponent jest odmontowywany
     };
- }, []);
+  }, []);
 
- // Start the game
- const startGame = () => {
-    socket.emit('startGame');
- };
+  const createNewGame = async () => {
+    try {
+      const newGameRef = doc(collection(firestore, 'games')); // Utwórz nowy dokument w kolekcji 'games'
+      const newGameId = newGameRef.id;
 
-// Handle a move
+      // Dodaj informacje o nowej grze do dokumentu w kolekcji 'games'
+      // Tutaj możesz dodać więcej informacji o grze
+      await setDoc(newGameRef, {
+        // Dodaj informacje o nowej grze, np. nazwa gry, stany itp.
+      });
 
-const handleMove = (index) => {
-    if (gameOver) {
-      return;
+      // Ustaw gracz 1 jako true
+      setIsPlayer1(true);
+
+      // Emituj informacje o nowej grze do wszystkich klientów
+      socket.emit('newGameCreated', { gameId: newGameId });
+    } catch (error) {
+      console.log(error.message);
     }
+  }
+
+  const handleJoinGame = gameId => {
+    socket.emit('joinGame', { gameId, games: gameData.availableGames }); // Przekazujemy informacje o dostępnych grach do serwera
+  };
   
-    if (board[index] !== null) {
-      // The position is already occupied, so ignore the move
-      alert('This position is already occupied. Please choose another one.');
-      return;
+
+  const handleClick = index => {
+    if (!gameData.board[index] && gameData.turn === 'X') {
+      socket.emit('move', { index });
     }
-  
-    const newBoard = [...board];
-    setCurrentPlayer(currentPlayer === 'X' ? 'O' : 'X');
-    newBoard[index] = currentPlayer;
-  
-    setBoard(newBoard);
-  
-    const isGameOver = checkGameStatus();
-    if (isGameOver) {
-      setGameOver(true);
-      setWinner(currentPlayer);
-    }
-  
-    // Emit the move to the server with the current player
-    socket.emit('move', { index, player: currentPlayer });
   };
 
+  // Jeśli gracz jest graczem 1, przenieś go do poczekalni
+  if (isPlayer1) {
+    return <WaitingRoom />;
+  }
 
-// Reset the game
-const handleReset = () => {
-    setBoard(Array(9).fill(null));
-    setCurrentPlayer(null);
-    setWinner(null);
-    setGameOver(false);
-    setReset(false);
-    setGameOver(false);};
-
- // Effect for checking game status
- useEffect(() => {
-    const isGameOver = checkGameStatus();
-    if (isGameOver) {
-      setGameOver(true);
-    }
- }, [board]);
-
- // Render the game board
- const renderBoard = () => {
-    return (
-      <div className="grid grid-cols-3 gap-4">
-        {board.map((cell, index) => (
-          <div key={index} className="border border-gray-400 p-4 text-4xl flex items-center justify-center cursor-pointer" onClick={() => handleMove(index)}>
-            {cell}
-          </div>
-        ))}
-      </div>
-    );
- };
-
- return (
-    <div className="container mx-auto mt-8 text-center">
-      {gameId && currentPlayer ? (
-        <>
-          <h1 className="text-4xl mb-4">Game in progress</h1>
-          <p className="text-xl mb-4">Current Player: {currentPlayer}</p>
-          {gameId && renderBoard()}
-          {gameOver && (
-            <div>
-              <p>{winner === 'draw' ? "It's a draw!" : `${winner} wins!`}</p>
-              <button onClick={handleReset}>Play Again</button>
+  return (
+    <div className="flex justify-center items-center h-screen">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold mb-4">Tic Tac Toe</h1>
+        {error && <p>Error: {error}</p>}
+        {gameData.gameId ? (
+          <>
+            <div className="board grid grid-cols-3 gap-4">
+              {gameData.board.map((cell, index) => (
+                <div
+                  key={index}
+                  className="cell bg-gray-200 h-16 w-16 flex justify-center items-center text-4xl cursor-pointer"
+                  onClick={() => handleClick(index)} // Dodajemy obsługę kliknięcia
+                >
+                  {cell}
+                </div>
+              ))}
             </div>
-          )}
-        </>
-      ) : (
-        <button className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" onClick={startGame}>Start Game</button>
-      )}
+            <p className="mt-4">Turn: {gameData.turn}</p>
+          </>
+        ) : (
+          <>
+            <button onClick={createNewGame}>Create Game</button>
+            <h2>or</h2>
+            <h2>Join a Game:</h2>
+            <ul>
+              {gameData.availableGames && Object.keys(gameData.availableGames).length > 0 ? (
+                <ul>
+                  {Object.keys(gameData.availableGames).map(gameId => (
+                    <li key={gameId}>
+                      <button onClick={() => handleJoinGame(gameId)}>Join Game {gameId}</button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No available games</p>
+              )}
+            </ul>
+          </>
+        )}
+      </div>
     </div>
- );
+  );
 }
 
-export default TicTacToe;
+// Komponent poczekalni dla gracza 1
+function WaitingRoom() {
+  return (
+    <div className="flex justify-center items-center h-screen">
+      <h2>Waiting for player 2 to join... </h2>
+    </div>
+  );
+}
+
+
+export default App;

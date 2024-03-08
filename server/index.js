@@ -1,131 +1,97 @@
 const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+
 const app = express();
-const http = require('http').Server(app);
-const { Server } = require('socket.io');
-const cors = require('cors');
-const admin = require('firebase-admin');
-const serviceAccount = require('./gameproject-df49d-firebase-adminsdk-ahfut-0335ed6cbd.json');
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
-
-const db = admin.firestore();
-
-app.use(cors());
-
-const io = new Server(http, {
+const server = http.createServer(app);
+const io = socketIo(server, {
   cors: {
-    origin: 'http://localhost:3000',
-    methods: ['GET', 'POST'],
-  },
+    origin: "http://localhost:3000",
+    methods: ["GET", "POST"],
+    allowedHeaders: ["my-custom-header"],
+    credentials: true
+  }
 });
 
-let players = []; // Tablica graczy
-let games = {}; // Obiekt gier
+let games = {}; // Obiekt przechowujący aktualne gry
 
-io.on('connection', (socket) => {
-  console.log(`User Connected: ${socket.id}`);
+// Serwer
+io.on('connection', socket => {
+  console.log('A client has connected ' + socket.id);
 
-  // Obsługa zdarzenia startGame
-  socket.on('startGame', () => {
-    // Sprawdzamy, czy istnieje inny gracz oczekujący na rozpoczęcie gry
-    if (players.length === 1) {
-      // Znaleziono drugiego gracza, tworzymy nową grę
-      const gameId = socket.id + '_' + players[0];
-      games[gameId] = {
-        players: [socket.id, players[0]],
-        currentPlayer: socket.id,
-        board: Array(9).fill(null),
-        gameStatus: 'ongoing'
-      };
+  // Przykładowe dane o dostępnych grach
+  const availableGames = {
+    game1: { name: 'Game 11' },
+    game2: { name: 'Game 2' },
+    // Tutaj możesz dodać więcej dostępnych gier
+  };
 
-      // Wyemituj zdarzenie do obu graczy, że gra się rozpoczyna
-      io.to(socket.id).emit('foundPlayer', { gameId, currentPlayer: socket.id });
-      io.to(players[0]).emit('foundPlayer', { gameId, currentPlayer: socket.id });
+  // Emitowanie informacji o dostępnych grach do klienta
+  socket.emit('availableGames', availableGames);
 
-      console.log("Znaleziono grę!");
-    } else {
-      // Dodaj gracza do tablicy graczy
-      players.push(socket.id);
-      // Wyślij informację do pierwszego gracza, że czekamy na drugiego gracza
-      socket.emit('playerNotFound');
-      console.log("Szukanie gry...");
-    }
+  let gameId;
+
+  socket.on('createGame', () => {
+    gameId = socket.id;
+    games[gameId] = { board: Array(9).fill(null), turn: 'X', players: [socket.id] };
+    socket.join(gameId);
+    socket.emit('gameCreated', { gameId });
+    console.log(`Player ${socket.id} created game ${gameId}`);
   });
+// Przekazanie games jako argument do funkcji obsługującej zdarzenie 'joinGame'
+// Obsługa zdarzenia 'joinGame'
+socket.on('joinGame', ({ gameId, games }) => {
+  if (games && games.hasOwnProperty(gameId)) {
+    console.log("dolaczono do "  + gameId)
+    socket.join(gameId);
+    io.to(gameId).emit('playerJoined', { playerId: socket.id });
+  } else {
+    console.log("blad")
+    socket.emit('invalidGameId', { message: 'Invalid game ID' });
+  }
+});
 
-  // Obsługa zdarzenia move
-  socket.on('move', (data) => {
-    // Pobierz informacje o grze
-    const game = games[data.gameId];
-    if (!game) return;
+// Obsługa zdarzenia 'playerJoined'
+socket.on('playerJoined', ({ playerId }) => {
+  console.log('joined')
+  if (playerId === socket.id) {
+    // Jeśli aktualny gracz to gracz 1, przenieś go do widoku gry
+    history.push('/tictactoe'); // Przeniesienie do ścieżki widoku gry
+  }
+});
 
-    // Sprawdź, czy aktualny gracz ma prawo wykonać ruch
-    if (game.currentPlayer === socket.id && game.gameStatus === 'ongoing') {
-      const { index, player } = data;
 
-      // Sprawdź, czy wybrana pozycja jest wolna
-      if (game.board[index] === null) {
-        // Zapisz ruch w tablicy
-        game.board[index] = player;
 
-        // Sprawdź, czy jest zwycięzca
-        const winner = calculateWinner(game.board);
-        if (winner) {
-          game.gameStatus = `${winner} wins`;
-        } else if (!game.board.includes(null)) {
-          // Jeśli plansza jest pełna, jest remis
-          game.gameStatus = 'Draw';
-        } else {
-          // Zmień gracza, który ma teraz kolej na ruch
-          game.currentPlayer = game.players.find(p => p !== socket.id);
-        }
 
-        // Wyślij zaktualizowaną planszę do obu graczy
-        io.to(game.players[0]).to(game.players[1]).emit('move', { index, player });
-      }
+
+
+  
+  
+
+  socket.on('move', ({ index }) => {
+    if (games[gameId] && !games[gameId].board[index] && games[gameId].turn === 'X') {
+      games[gameId].board[index] = 'X';
+      games[gameId].turn = 'O';
+      io.to(gameId).emit('update', games[gameId]);
+    } else if (games[gameId] && !games[gameId].board[index] && games[gameId].turn === 'O') {
+      games[gameId].board[index] = 'O';
+      games[gameId].turn = 'X';
+      io.to(gameId).emit('update', games[gameId]);
     }
   });
 
   socket.on('disconnect', () => {
-    console.log(`User Disconnected: ${socket.id}`);
-    // Usuń gracza z tablicy graczy, jeśli się rozłączy
-    players = players.filter((player) => player !== socket.id);
-
-    // Sprawdź, czy użytkownik opuścił jakąś grę
-    for (const gameId in games) {
-      if (games[gameId].players.includes(socket.id)) {
-        delete games[gameId]; // Usuń grę
-        console.log(`Game ${gameId} has been removed.`);
+    if (games[gameId]) {
+      games[gameId].players = games[gameId].players.filter(playerId => playerId !== socket.id);
+      if (games[gameId].players.length === 0) {
+        delete games[gameId];
       }
     }
+    console.log('A client has disconnected');
   });
 });
 
-function calculateWinner(board) {
-  const lines = [
-    [0, 1, 2],
-    [3, 4, 5],
-    [6, 7, 8],
-    [0, 3, 6],
-    [1, 4, 7],
-    [2, 5, 8],
-    [0, 4, 8],
-    [2, 4, 6],
-  ];
 
-  for (let i = 0; i < lines.length; i++) {
-    const [a, b, c] = lines[i];
-    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-      return board[a];
-    }
-  }
-
-  return null;
-}
-
-const PORT = process.env.PORT || 3001;
-
-http.listen(PORT, () => {
-  console.log(`Server is running at port: ${PORT}`);
+server.listen(3001, () => {
+  console.log('Server is running on port 3001');
 });
