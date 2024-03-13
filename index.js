@@ -1,90 +1,102 @@
-const express=require("express")
-const app=express()
+const express = require("express");
+const app = express();
+const path = require("path");
+const http = require("http");
+const { Server } = require("socket.io");
 
-const path=require("path")
-const http=require("http")
-const {Server}=require("socket.io")
+const server = http.createServer(app);
+const io = new Server(server);
+app.use(express.static(path.resolve("")));
 
+let arr = [];
+let playingArray = [];
 
-const server=http.createServer(app)
+io.on("connection", (socket) => {
+    socket.on("find", (e) => {
+        if (e.name != null) {
+            arr.push({ username: e.name, socketId: socket.id });
 
-const io=new Server(server)
-app.use(express.static(path.resolve("")))
+            if (arr.length >= 2) {
+                let p1obj = {
+                    p1name: arr[0].username,
+                    p1value: "X",
+                    p1move: "",
+                };
+                let p2obj = {
+                    p2name: arr[1].username,
+                    p2value: "O",
+                    p2move: "",
+                };
 
-let arr=[]
-let playingArray=[]
+                let obj = {
+                    p1: p1obj,
+                    p2: p2obj,
+                    sum: 1,
+                };
+                playingArray.push(obj);
 
-io.on("connection",(socket)=>{
+                arr.splice(0, 2);
 
-    socket.on("find",(e)=>{
-
-        if(e.name!=null){
-
-            arr.push(e.name)
-
-            if(arr.length>=2){
-                let p1obj={
-                    p1name:arr[0],
-                    p1value:"X",
-                    p1move:""
-                }
-                let p2obj={
-                    p2name:arr[1],
-                    p2value:"O",
-                    p2move:""
-                }
-
-                let obj={
-                    p1:p1obj,
-                    p2:p2obj,
-                    sum:1
-                }
-                playingArray.push(obj)
-
-                arr.splice(0,2)
-
-                io.emit("find",{allPlayers:playingArray})
-
+                io.emit("find", { allPlayers: playingArray });
+                io.to(playingArray[0].p1.p1name).emit("yourTurn");
             }
-
         }
+    });
 
-    })
+    socket.on("playing", (e) => {
+        const currentPlayerIndex = playingArray.findIndex(
+            (obj) => obj.p1.p1name === e.name || obj.p2.p2name === e.name
+        );
 
-    socket.on("playing",(e)=>{
-        if(e.value=="X"){
-            let objToChange=playingArray.find(obj=>obj.p1.p1name===e.name)
+        if (currentPlayerIndex === -1) return; // Gracz nie jest w grze
 
-            objToChange.p1.p1move=e.id
-            objToChange.sum++
+        const currentPlayer = playingArray[currentPlayerIndex];
+        const currentPlayerSymbol =
+            currentPlayer.p1.p1name === e.name ? "X" : "O";
+
+        if (
+            currentPlayerSymbol === "X" &&
+            currentPlayer.sum % 2 === 1 &&
+            e.value === "X"
+        ) {
+            currentPlayer.p1.p1move = e.id;
+            currentPlayer.sum++;
+            io.emit("playing", { allPlayers: playingArray });
+            io.to(currentPlayer.p2.p2name).emit("yourTurn");
+        } else if (
+            currentPlayerSymbol === "O" &&
+            currentPlayer.sum % 2 === 0 &&
+            e.value === "O"
+        ) {
+            currentPlayer.p2.p2move = e.id;
+            currentPlayer.sum++;
+            io.emit("playing", { allPlayers: playingArray });
+            io.to(currentPlayer.p1.p1name).emit("yourTurn");
         }
-        else if(e.value=="O"){
-            let objToChange=playingArray.find(obj=>obj.p2.p2name===e.name)
+    });
 
-            objToChange.p2.p2move=e.id
-            objToChange.sum++
+    socket.on("gameOver", (e) => {
+        playingArray = playingArray.filter(
+            (obj) => obj.p1.p1name !== e.name && obj.p2.p2name !== e.name
+        );
+        console.log(playingArray);
+        console.log("lol");
+    });
+
+    socket.on("disconnect", () => {
+        const disconnectedUserIndex = arr.findIndex(
+            (user) => user.socketId === socket.id
+        );
+        if (disconnectedUserIndex !== -1) {
+            arr.splice(disconnectedUserIndex, 1);
         }
+    });
+});
 
-        io.emit("playing",{allPlayers:playingArray})
+app.get("/", (req, res) => {
+    return res.sendFile("index.html");
+});
 
-    })
-
-    socket.on("gameOver",(e)=>{
-        playingArray=playingArray.filter(obj=>obj.p1.p1name!==e.name)
-        console.log(playingArray)
-        console.log("lol")
-    })
-
-
-})
-
-
-
-
-app.get("/",(req,res)=>{
-    return res.sendFile("index.html")
-})
-
-server.listen(3000,()=>{
-    console.log("port connected to 3000")
-})
+server.listen(3000, () => {
+    console.log("Port connected to 3000");
+});
