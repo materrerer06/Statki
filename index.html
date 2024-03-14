@@ -120,6 +120,7 @@
 
 <script>
     let moveExecuted = false; // Zmienna globalna
+    let movesMade = []; // Tablica przechowująca id przycisków, które zostały już użyte
 
     document.getElementById("loading").style.display = "none";
     document.getElementById("bigcont").style.display = "none";
@@ -145,41 +146,49 @@
     });
 
     socket.on("find", (e) => {
-        const allPlayersArray = e.allPlayers;
-        console.log("html", allPlayersArray);
+    const allPlayersArray = e.allPlayers;
 
-        if (name) {
-            document.getElementById("userCont").style.display = "block";
-            document.getElementById("oppNameCont").style.display = "block";
-            document.getElementById("valueCont").style.display = "block";
-            document.getElementById("loading").style.display = "none";
-            document.getElementById("name").style.display = "none";
-            document.getElementById("find").style.display = "none";
-            document.getElementById("enterName").style.display = "none";
-            document.getElementById("bigcont").style.display = "grid";
-            document.getElementById("whosTurn").style.display = "block";
-            document.getElementById("whosTurn").innerText = "X's Turn";
-        }
+    if (name) {
+        document.getElementById("userCont").style.display = "block";
+        document.getElementById("oppNameCont").style.display = "block";
+        document.getElementById("valueCont").style.display = "block";
+        document.getElementById("loading").style.display = "none";
+        document.getElementById("name").style.display = "none";
+        document.getElementById("find").style.display = "none";
+        document.getElementById("enterName").style.display = "none";
+        document.getElementById("bigcont").style.display = "grid";
+        document.getElementById("whosTurn").style.display = "block";
+        document.getElementById("whosTurn").innerText = "X's Turn";
+    }
 
-        let oppName;
-        let value;
+    let oppName;
+    let value;
 
-        const foundObject = allPlayersArray.find(obj => obj.p1.p1name === name || obj.p2.p2name === name);
-        oppName = foundObject.p1.p1name === name ? foundObject.p2.p2name : foundObject.p1.p1name;
-        value = foundObject.p1.p1name === name ? foundObject.p1.p1value : foundObject.p2.p2value;
+    const foundObject = allPlayersArray.find(obj => obj.p1.p1name === name || obj.p2.p2name === name);
+    oppName = foundObject.p1.p1name === name ? foundObject.p2.p2name : foundObject.p1.p1name;
+    value = foundObject.p1.p1name === name ? foundObject.p1.p1value : foundObject.p2.p2value;
 
-        document.getElementById("oppName").innerText = oppName;
-        document.getElementById("value").innerText = value;
-    });
+    document.getElementById("oppName").innerText = oppName;
+    document.getElementById("value").innerText = value;
+
+    // Odblokowanie przycisków dla gracza rozpoczynającego grę
+    if (name === foundObject.p1.p1name && !foundObject.p1.p1move) {
+        enableButtons();
+    } else if (name === foundObject.p2.p2name && !foundObject.p2.p2move) {
+        enableButtons();
+    }
+});
+
 
     document.querySelectorAll(".btn").forEach(btn => {
         btn.addEventListener("click", function () {
             if (!moveExecuted && this.innerText === '') {
                 const value = document.getElementById("value").innerText;
                 this.innerText = value;
+                movesMade.push(this.id); // Dodanie id klikniętego przycisku do tablicy
                 socket.emit("playing", { value: value, id: this.id, name: name });
                 moveExecuted = true;
-                // Blokowanie możliwości kliknięcia po wykonaniu ruchu
+                // Wyłączenie obsługi kliknięć dla wszystkich przycisków po pierwszym kliknięciu
                 document.querySelectorAll(".btn").forEach(btn => {
                     btn.disabled = true;
                 });
@@ -188,28 +197,45 @@
     });
 
     socket.on("playing", (e) => {
-        moveExecuted = false;
-        const foundObject = e.allPlayers.find(obj => obj.p1.p1name === name || obj.p2.p2name === name);
-        const p1id = foundObject.p1.p1move;
-        const p2id = foundObject.p2.p2move;
+    const foundObject = e.allPlayers.find(obj => obj.p1.p1name === name || obj.p2.p2name === name);
+    const p1id = foundObject.p1.p1move;
+    const p2id = foundObject.p2.p2move;
 
-        if (foundObject.sum % 2 === 0) {
-            document.getElementById("whosTurn").innerText = "O's Turn";
-        } else {
-            document.getElementById("whosTurn").innerText = "X's Turn";
-        }
+    if (foundObject.sum % 2 === 0) {
+        document.getElementById("whosTurn").innerText = "O's Turn";
+    } else {
+        document.getElementById("whosTurn").innerText = "X's Turn";
+    }
 
-        if (p1id) {
-            document.getElementById(p1id).innerText = "X";
-            document.getElementById(p1id).disabled = true;
-        }
-        if (p2id) {
-            document.getElementById(p2id).innerText = "O";
-            document.getElementById(p2id).disabled = true;
-        }
+    if (p1id) {
+        document.getElementById(p1id).innerText = "X";
+        document.getElementById(p1id).disabled = true;
+    }
+    if (p2id) {
+        document.getElementById(p2id).innerText = "O";
+        document.getElementById(p2id).disabled = true;
+    }
 
-        check(name, foundObject.sum);
+    check(name, foundObject.sum);
+});
+
+function enableButtons() {
+    document.querySelectorAll(".btn").forEach(btn => {
+        if (btn.innerText === '') {
+            btn.disabled = false;
+        }
     });
+}
+
+// Odblokowanie przycisków po wykonaniu ruchu przez obu graczy
+enableButtons();
+
+function disableButtons() {
+    document.querySelectorAll(".btn").forEach(btn => {
+        btn.disabled = true;
+    });
+}
+
 
     function check(name, sum) {
         const btns = document.querySelectorAll(".btn");
